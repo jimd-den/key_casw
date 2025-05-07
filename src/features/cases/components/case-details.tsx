@@ -1,6 +1,7 @@
+
 "use client";
 
-import type { MysteryCase } from "@/types";
+import type { MysteryCase } from "@/core/enterprise/entities/mystery-case.entity"; // Updated import
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EvidenceList } from "./evidence-list";
@@ -31,13 +32,12 @@ export function CaseDetails({ mysteryCase }: CaseDetailsProps) {
   const { id, title, description, difficulty, authorId, evidence, suspects, victims, createdAt } = mysteryCase;
   const formattedDate = new Date(createdAt).toLocaleDateString();
   const [notes, setNotes] = useState(""); // Client-side notes
-  const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
-
+  
   const [solutionGuess, setSolutionGuess] = useState("");
   const [isSolutionSubmitted, setIsSolutionSubmitted] = useState(false);
 
 
-  const initialState = { message: "", success: false };
+  const initialState = { message: "", success: false, isCorrect: false };
   const [state, formAction] = useFormState(solveCaseAction, initialState);
   const { toast } = useToast();
 
@@ -56,18 +56,17 @@ export function CaseDetails({ mysteryCase }: CaseDetailsProps) {
 
 
   useEffect(() => {
-    if (state.message && isSolutionSubmitted) { // only show toast if form was submitted by this component instance
+    if (state.message && isSolutionSubmitted) { 
       toast({
-        title: state.isCorrect ? "Correct!" : state.success ? "Submitted" : "Error",
+        title: state.isCorrect ? "Correct!" : state.success ? "Feedback" : "Error",
         description: state.message,
         variant: state.isCorrect ? "default" : state.success ? "default" : "destructive",
         duration: state.isCorrect ? 8000 : 5000,
       });
       if (state.success && state.isCorrect) {
-        // Optionally clear guess or disable form further
         setSolutionGuess(""); 
       }
-      setIsSolutionSubmitted(false); // Reset submission flag
+      setIsSolutionSubmitted(false); 
     }
   }, [state, toast, isSolutionSubmitted]);
 
@@ -114,7 +113,6 @@ export function CaseDetails({ mysteryCase }: CaseDetailsProps) {
         </CardHeader>
         <CardContent>
           <Textarea
-            ref={notesTextareaRef}
             placeholder="Start typing your notes..."
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
@@ -169,12 +167,12 @@ export function CaseDetails({ mysteryCase }: CaseDetailsProps) {
                   </DialogContent>
                 </Dialog>
 
-                <Button type="submit" disabled={!solutionGuess.trim()}>
-                    <Send className="mr-2 h-4 w-4" /> Submit Guess
+                <Button type="submit" disabled={!solutionGuess.trim() || isSolutionSubmitted}>
+                    <Send className="mr-2 h-4 w-4" /> {isSolutionSubmitted ? "Submitting..." : "Submit Guess"}
                 </Button>
             </div>
           </form>
-          {state.message && state.success && !state.errors && (
+          {state.message && state.success && !state.errors && isSolutionSubmitted && ( // Show alert only after submission and if it's from this interaction
              <Alert variant={state.isCorrect ? "default" : "destructive"} className="mt-4 bg-opacity-10">
               <Lightbulb className="h-4 w-4" />
               <AlertTitle>{state.isCorrect ? "Correct!" : "Feedback"}</AlertTitle>

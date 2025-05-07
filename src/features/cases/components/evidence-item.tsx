@@ -1,4 +1,5 @@
-import type { Evidence } from "@/types";
+
+import type { Evidence } from "@/core/enterprise/entities/evidence.entity"; // Updated import
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ImageIcon, FileText, FileAudio, StickyNote, Download } from "lucide-react";
 import Image from "next/image";
@@ -19,7 +20,7 @@ const EvidenceIcon = ({ type }: { type: Evidence['type'] }) => {
 };
 
 export function EvidenceItem({ evidence }: EvidenceItemProps) {
-  const { title, type, content, description, fileName } = evidence;
+  const { title, type, content, description, fileName, dataAiHint } = evidence;
 
   const isExternalUrl = content.startsWith('http://') || content.startsWith('https://');
   const isTextDocument = type === 'document' && content.startsWith('Text: ');
@@ -42,7 +43,7 @@ export function EvidenceItem({ evidence }: EvidenceItemProps) {
       <CardContent>
         {type === 'picture' && isExternalUrl && (
           <div className="relative aspect-video w-full rounded-md overflow-hidden border">
-            <Image src={content} alt={title} layout="fill" objectFit="contain" data-ai-hint="evidence photo" />
+            <Image src={content} alt={title} layout="fill" objectFit="contain" data-ai-hint={dataAiHint || "evidence photo"} />
           </div>
         )}
         {type === 'audio' && isExternalUrl && (
@@ -58,7 +59,7 @@ export function EvidenceItem({ evidence }: EvidenceItemProps) {
             <pre className="whitespace-pre-wrap text-sm">{documentText}</pre>
           </div>
         )}
-        {type === 'note' && !isTextDocument && (
+        {type === 'note' && !isTextDocument && ( // Ensure notes are not mistaken for text documents
            <div className="p-3 bg-secondary/30 rounded-md border">
             <p className="text-sm whitespace-pre-wrap">{content}</p>
           </div>
@@ -73,6 +74,9 @@ export function EvidenceItem({ evidence }: EvidenceItemProps) {
                  <Button variant="outline" size="sm" disabled>
                     <Download className="mr-2 h-4 w-4" /> Download {fileName} (mock)
                  </Button>
+            )}
+             {!fileName && type !== 'note' && (
+                <p className="text-xs text-muted-foreground">Content: {content.substring(0, 50)}{content.length > 50 ? '...' : ''}</p>
             )}
           </div>
         )}

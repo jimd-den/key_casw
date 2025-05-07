@@ -1,8 +1,9 @@
-import type { MysteryCase } from "@/types";
+
+import type { MysteryCase } from "@/core/enterprise/entities/mystery-case.entity"; // Updated import
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { Puzzle, User, CalendarDays, BarChart3 } from "lucide-react";
+import { Puzzle, User, CalendarDays } from "lucide-react"; // Removed BarChart3 as it wasn't used
 import { Badge } from "@/components/ui/badge";
 import Image from "next/image";
 
@@ -12,11 +13,11 @@ interface CaseCardProps {
 
 // Helper to get a preview image URL or a placeholder
 const getPreviewImageUrl = (mysteryCase: MysteryCase) => {
-  const pictureEvidence = mysteryCase.evidence.find(e => e.type === 'picture');
-  if (pictureEvidence && pictureEvidence.content.startsWith('https://picsum.photos')) {
+  const pictureEvidence = mysteryCase.evidence.find(e => e.type === 'picture' && (e.content.startsWith('http://') || e.content.startsWith('https://')));
+  if (pictureEvidence) {
     return pictureEvidence.content;
   }
-  // Fallback placeholder if no picsum image is found
+  // Fallback placeholder if no suitable picture evidence is found
   return `https://picsum.photos/seed/${mysteryCase.id}/400/200`;
 };
 
@@ -34,7 +35,7 @@ export function CaseCard({ mysteryCase }: CaseCardProps) {
           alt={`Preview for ${title}`} 
           layout="fill" 
           objectFit="cover"
-          data-ai-hint="mystery crime" 
+          data-ai-hint={mysteryCase.evidence.find(e => e.type === 'picture')?.dataAiHint || "mystery crime"}
         />
       </div>
       <CardHeader className="pb-2">

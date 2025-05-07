@@ -1,3 +1,4 @@
+
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -20,8 +21,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useAuth } from "@/context/auth-context";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import { CreateCaseSchema, createCaseAction, type CreateCaseInput } from "@/lib/actions/case.actions";
-import type { Difficulty, EvidenceType } from "@/types";
+import { createCaseAction } from "@/lib/actions/case.actions";
+import { CreateCaseSchemaDTO as CreateCaseSchema, type CreateCaseInputDTO as CreateCaseInput } from "@/core/application/use-cases/case/create-case.use-case";
+import type { Difficulty } from "@/core/enterprise/entities/mystery-case.entity";
+import type { EvidenceType } from "@/core/enterprise/entities/evidence.entity";
 import { FilePlus, PlusCircle, Trash2, Image as ImageIcon, FileText, FileAudio, StickyNote } from "lucide-react";
 import { useFormState } from "react-dom";
 import { useEffect } from "react";
@@ -41,12 +44,12 @@ export function CaseForm() {
   const { toast } = useToast();
 
   const form = useForm<CreateCaseInput>({
-    resolver: zodResolver(CreateCaseSchema),
+    resolver: zodResolver(CreateCaseSchema), // Using DTO schema from use case
     defaultValues: {
       title: "",
       description: "",
       difficulty: "Medium",
-      authorId: currentUser?.id || "",
+      // authorId is set via hidden input, filled by effect
       evidence: [{ title: "", type: "note", content: "", description: "" }],
       suspects: [],
       victims: [],
@@ -69,10 +72,9 @@ export function CaseForm() {
     if (!currentUser && !authLoading) {
       toast({ title: "Unauthorized", description: "Please log in to create a case.", variant: "destructive" });
       router.push("/auth/login");
-    } else if (currentUser) {
-      form.setValue("authorId", currentUser.id);
     }
-  }, [currentUser, authLoading, router, toast, form]);
+    // authorId is handled by a hidden field in the form, no need to setValue here for it.
+  }, [currentUser, authLoading, router, toast]);
 
   useEffect(() => {
     if (state.message) {
@@ -82,39 +84,26 @@ export function CaseForm() {
         variant: state.success ? "default" : "destructive",
       });
       if (state.success && state.caseId) {
-        form.reset(); // Reset form on successful submission
+        form.reset(); 
         router.push(`/mysteries/${state.caseId}`);
       } else if (!state.success && state.errors) {
-        // Manually set form errors if needed, though RHF handles some
-        for (const [fieldName, errors] of Object.entries(state.errors)) {
-          if (errors) {
-             // This casting is a bit of a hack due to complex RHF typing with field arrays
-            form.setError(fieldName as any, { type: 'server', message: errors.join(', ') });
+        // RHF's zodResolver should handle most client-side errors.
+        // This is for server-side validation errors returned by the action.
+        Object.entries(state.errors).forEach(([key, value]) => {
+          if (value) {
+            form.setError(key as keyof CreateCaseInput, {
+              type: "server",
+              message: value.join(", "),
+            });
           }
-        }
+        });
       }
     }
   }, [state, toast, router, form]);
 
 
   if (authLoading) return <p>Loading user information...</p>;
-  if (!currentUser) return null; // Redirect logic is in useEffect
-
-  // Handler for form submission using server action
-  const onSubmit = (formData: FormData) => {
-    // Add authorId if not already on form (should be set by defaultValues or effect)
-    if (!formData.has('authorId') && currentUser?.id) {
-      formData.set('authorId', currentUser.id);
-    }
-    // Convert suspects and victims from array to comma-separated string for FormData
-    const suspects = form.getValues('suspects').join(',');
-    const victims = form.getValues('victims').join(',');
-    formData.set('suspects', suspects);
-    formData.set('victims', victims);
-    
-    formAction(formData);
-  };
-
+  if (!currentUser) return null; 
 
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-xl">
@@ -128,9 +117,10 @@ export function CaseForm() {
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form action={onSubmit} className="space-y-8">
-            <FormField name="authorId" control={form.control} render={({ field }) => <input type="hidden" {...field} />} />
-            
+          <form action={formAction} className="space-y-8"> {/* Changed to formAction */}
+            {/* Hidden authorId field */}
+            {currentUser?.id && <input type="hidden" {...form.register("authorId" as any)} value={currentUser.id} />}
+
             <FormField
               control={form.control}
               name="title"
@@ -172,7 +162,6 @@ export function CaseForm() {
               )}
             />
 
-            {/* Evidence Fields */}
             <div className="space-y-4">
               <FormLabel className="text-lg font-semibold">Evidence</FormLabel>
               {fields.map((item, index) => (
@@ -215,11 +204,10 @@ export function CaseForm() {
                              <Textarea placeholder={form.watch(`evidence.${index}.type`) === 'document' ? "Text: Document content here..." : "Your note content..."} {...field} />
                           ) : (
                             <Input placeholder="https://example.com/image.jpg or data for mock upload" {...field} type={form.watch(`evidence.${index}.type`) === 'picture' || form.watch(`evidence.${index}.type`) === 'audio' ? 'text':'text'}/>
-                            // In a real app, this would be type="file" and require complex handling
                           )}
                         </FormControl>
                          { (form.watch(`evidence.${index}.type`) !== 'note' && form.watch(`evidence.${index}.type`) !== 'document' ) &&
-                            <FormDescription>For demo: enter a URL or placeholder text. Real file uploads are not implemented.</FormDescription>
+                            <FormDescription>For demo: enter a URL or placeholder text. Real file uploads are not fully implemented in this UI mock.</FormDescription>
                          }
                         <FormMessage />
                       </FormItem>
@@ -246,7 +234,7 @@ export function CaseForm() {
                         <FormLabel>Evidence Description (Author's Note)</FormLabel>
                         <FormControl><Textarea placeholder="Optional notes about this evidence..." {...field} /></FormControl>
                         <FormMessage />
-                      FormItem>
+                      </FormItem> // Corrected closing tag
                     )}
                   />
                   <Button type="button" variant="destructive" size="sm" onClick={() => remove(index)}>
@@ -272,8 +260,9 @@ export function CaseForm() {
                   <FormControl>
                     <Input 
                       placeholder="Comma-separated, e.g., John Doe, Jane Smith" 
+                      // RHF expects array for 'suspects', so we handle conversion for display and change
                       value={Array.isArray(field.value) ? field.value.join(', ') : ''}
-                      onChange={(e) => field.onChange(e.target.value.split(',').map(s => s.trim()))}
+                      onChange={(e) => field.onChange(e.target.value.split(',').map(s => s.trim()).filter(s => s))}
                     />
                   </FormControl>
                   <FormDescription>Enter suspect names or descriptions, separated by commas.</FormDescription>
@@ -292,7 +281,7 @@ export function CaseForm() {
                      <Input 
                       placeholder="Comma-separated, e.g., Mr. Body, The Museum" 
                       value={Array.isArray(field.value) ? field.value.join(', ') : ''}
-                      onChange={(e) => field.onChange(e.target.value.split(',').map(s => s.trim()))}
+                      onChange={(e) => field.onChange(e.target.value.split(',').map(s => s.trim()).filter(s => s))}
                     />
                   </FormControl>
                   <FormDescription>Enter victim names or entities, separated by commas.</FormDescription>
@@ -339,8 +328,8 @@ export function CaseForm() {
             <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
               {form.formState.isSubmitting ? "Creating Case..." : "Create Case"}
             </Button>
-            {state.message && !state.success && (
-              <p className="text-sm font-medium text-destructive">{state.message}</p>
+            {state.message && !state.success && state.errors?._form && (
+              <p className="text-sm font-medium text-destructive">{state.errors._form.join(', ')}</p>
             )}
           </form>
         </Form>

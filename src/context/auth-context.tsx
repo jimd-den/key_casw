@@ -1,6 +1,7 @@
+
 "use client";
 
-import type { User } from '@/types';
+import type { User } from '@/core/enterprise/entities/user.entity'; // Updated import
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 
 interface AuthContextType {

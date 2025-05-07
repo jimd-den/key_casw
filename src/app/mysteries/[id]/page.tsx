@@ -1,9 +1,24 @@
+
 import { CaseDetails } from "@/features/cases/components/case-details";
-import { getCaseById, getCases } from "@/lib/data-store";
 import { AlertTriangle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { GetCaseByIdUseCase } from "@/core/application/use-cases/case/get-case-by-id.use-case";
+import { ListCasesUseCase } from "@/core/application/use-cases/case/list-cases.use-case";
+import { InMemoryCaseRepository } from "@/core/interface-adapters/gateways/in-memory-case.repository";
+
+const caseRepository = new InMemoryCaseRepository(); // Shared instance for this page module
+
+async function getCaseDetails(id: string) {
+  const getCaseByIdUseCase = new GetCaseByIdUseCase(caseRepository);
+  return await getCaseByIdUseCase.execute(id);
+}
+
+async function getAllCasesForStaticParams() {
+  const listCasesUseCase = new ListCasesUseCase(caseRepository);
+  return await listCasesUseCase.execute(); // Get all cases for param generation
+}
 
 interface MysteryPageProps {
   params: { id: string };
@@ -11,14 +26,15 @@ interface MysteryPageProps {
 
 export async function generateStaticParams() {
   // Pre-render paths for existing cases to improve performance
-  const cases = await getCases();
+  const cases = await getAllCasesForStaticParams();
   return cases.map((c) => ({
     id: c.id,
   }));
 }
+export const dynamic = 'force-dynamic'; // Or 'auto' if preferred, but force-dynamic ensures fresh data for dynamic paths
 
 export default async function MysteryPage({ params }: MysteryPageProps) {
-  const mysteryCase = await getCaseById(params.id);
+  const mysteryCase = await getCaseDetails(params.id);
 
   if (!mysteryCase) {
     return (

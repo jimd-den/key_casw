@@ -1,176 +1,132 @@
+
 "use server";
 
-import type { MysteryCase, Difficulty } from "@/types";
-import { addCase as dbAddCase, getCaseById as dbGetCaseById } from "@/lib/data-store";
-import { z } from "zod";
 import { revalidatePath } from "next/cache";
+import { InMemoryCaseRepository } from "@/core/interface-adapters/gateways/in-memory-case.repository";
+import { CreateCaseUseCase, CreateCaseSchemaDTO, type CreateCaseInputDTO } from "@/core/application/use-cases/case/create-case.use-case";
+import { SolveCaseUseCase, SolveCaseSchemaDTO, type SolveCaseInputDTO } from "@/core/application/use-cases/case/solve-case.use-case";
+import { z } from "zod";
 
-const EvidenceSchema = z.object({
-  title: z.string().min(1, "Evidence title is required."),
-  type: z.enum(['picture', 'document', 'audio', 'note']),
-  content: z.string().min(1, "Evidence content is required."), // URL for files, or text for notes
-  description: z.string().optional(),
-  fileName: z.string().optional(),
-});
+// Instantiate repository (singleton or per request depending on DB)
+// For in-memory, a single instance shared across server actions is fine for demo.
+// In a real app with a DB, you'd get a connection/client here.
+const caseRepository = new InMemoryCaseRepository();
 
-export const CreateCaseSchema = z.object({
-  title: z.string().min(3, "Title must be at least 3 characters long."),
-  description: z.string().min(10, "Description must be at least 10 characters long."),
-  difficulty: z.enum(["Easy", "Medium", "Hard"]),
-  authorId: z.string(), // This should be set by the server based on logged-in user
-  evidence: z.array(EvidenceSchema).min(1, "At least one piece of evidence is required."),
-  suspects: z.array(z.string().min(1)).min(1, "At least one suspect is required."),
-  victims: z.array(z.string().min(1)).min(1, "At least one victim is required."),
-  solution: z.string().min(10, "Solution must be at least 10 characters long."),
-  isPublished: z.boolean().default(false),
-});
-
-export type CreateCaseInput = z.infer<typeof CreateCaseSchema>;
-
-interface FormState {
+// --- Create Case Action ---
+interface CreateCaseFormState {
   message: string;
-  errors?: Record<string, string[] | undefined>;
-  fieldValues?: CreateCaseInput;
+  errors?: Partial<Record<keyof CreateCaseInputDTO | '_form', string[]>>; // Using ZodError.flatten().fieldErrors structure
+  fieldValues?: CreateCaseInputDTO;
   success: boolean;
   caseId?: string;
 }
 
 export async function createCaseAction(
-  prevState: FormState,
+  prevState: CreateCaseFormState,
   formData: FormData
-): Promise<FormState> {
+): Promise<CreateCaseFormState> {
+  
   const rawFormData = Object.fromEntries(formData.entries());
-
-  // Manually construct evidence array from formData
-  const evidence: Array<z.infer<typeof EvidenceSchema>> = [];
+  
+  // Manually construct evidence array from formData for CreateCaseInputDTO
+  const evidenceArray: Array<{ title: string; type: 'picture' | 'document' | 'audio' | 'note'; content: string; description?: string; fileName?: string; }> = [];
   let i = 0;
   while (rawFormData[`evidence[${i}].title`]) {
-    evidence.push({
+    evidenceArray.push({
       title: rawFormData[`evidence[${i}].title`] as string,
       type: rawFormData[`evidence[${i}].type`] as 'picture' | 'document' | 'audio' | 'note',
-      content: rawFormData[`evidence[${i}].content`] as string, // For demo, actual file upload would be complex
+      content: rawFormData[`evidence[${i}].content`] as string,
       description: rawFormData[`evidence[${i}].description`] as string | undefined,
       fileName: rawFormData[`evidence[${i}].fileName`] as string | undefined,
     });
     i++;
   }
-  
-  // Process suspects and victims which are comma-separated strings
-   const suspectsString = rawFormData.suspects as string || "";
-   const victimsString = rawFormData.victims as string || "";
 
+  const suspectsString = rawFormData.suspects as string || "";
+  const victimsString = rawFormData.victims as string || "";
 
-  const parsedData = {
-    title: rawFormData.title,
-    description: rawFormData.description,
-    difficulty: rawFormData.difficulty,
-    authorId: rawFormData.authorId, // In real app, get from session
-    solution: rawFormData.solution,
+  const caseData: CreateCaseInputDTO = {
+    title: rawFormData.title as string,
+    description: rawFormData.description as string,
+    difficulty: rawFormData.difficulty as "Easy" | "Medium" | "Hard",
+    solution: rawFormData.solution as string,
     isPublished: rawFormData.isPublished === 'on' || rawFormData.isPublished === 'true',
-    evidence,
-    suspects: suspectsString.split(',').map(s => s.trim()).filter(s => s),
-    victims: victimsString.split(',').map(v => v.trim()).filter(v => v),
+    evidence: evidenceArray,
+    suspects: suspectsString.split(',').map(s => s.trim()).filter(s => s.length > 0),
+    victims: victimsString.split(',').map(v => v.trim()).filter(v => v.length > 0),
   };
   
-  const validatedFields = CreateCaseSchema.safeParse(parsedData);
+  const authorId = rawFormData.authorId as string; // Should ideally come from session/auth
 
-  if (!validatedFields.success) {
-    console.error("Validation errors:", validatedFields.error.flatten().fieldErrors);
+  if (!authorId) {
     return {
-      message: "Validation failed. Please check the fields.",
-      errors: validatedFields.error.flatten().fieldErrors,
-      fieldValues: parsedData as CreateCaseInput, // Cast, as it's partially valid for re-populating form
+      message: "User not authenticated.",
+      success: false,
+      errors: { _form: ["User not authenticated."] }
+    };
+  }
+
+  const createCaseUseCase = new CreateCaseUseCase(caseRepository);
+  const result = await createCaseUseCase.execute(caseData, authorId);
+
+  if (!result.success) {
+    return {
+      message: result.message,
+      errors: result.errors?.flatten().fieldErrors as CreateCaseFormState['errors'],
+      fieldValues: caseData,
       success: false,
     };
   }
-  
-  try {
-    // Simulate file uploads for 'picture', 'document', 'audio'
-    // In a real app, this would involve saving files to storage and getting URLs
-    const processedEvidence = validatedFields.data.evidence.map(ev => {
-      if (['picture', 'document', 'audio'].includes(ev.type) && !ev.content.startsWith('https://') && !ev.content.startsWith('Text:')) {
-        // This is a mock placeholder for uploaded file content.
-        // In a real app, you'd handle actual file data and store it.
-        return { ...ev, content: `https://picsum.photos/seed/${ev.title.replace(/\s+/g, '-')}/400/300`, fileName: ev.fileName || `${ev.type}_file.dat` };
-      }
-      return ev;
-    });
 
-
-    const newCaseData = {
-      ...validatedFields.data,
-      evidence: processedEvidence,
-    };
-
-    const newCase = await dbAddCase(newCaseData);
-    revalidatePath("/mysteries");
-    revalidatePath(`/mysteries/${newCase.id}`);
-    revalidatePath("/create-case"); // To clear the form potentially
-
-    return {
-      message: `Case "${newCase.title}" created successfully!`,
-      success: true,
-      caseId: newCase.id,
-    };
-  } catch (error) {
-    console.error("Error creating case:", error);
-    return {
-      message: "Failed to create case. An unexpected error occurred.",
-      fieldValues: validatedFields.data,
-      success: false,
-    };
+  revalidatePath("/mysteries");
+  if (result.caseDetails?.id) {
+    revalidatePath(`/mysteries/${result.caseDetails.id}`);
   }
+  revalidatePath("/create-case");
+
+  return {
+    message: result.message,
+    success: true,
+    caseId: result.caseDetails?.id,
+  };
 }
 
 
-const SolveCaseSchema = z.object({
-  caseId: z.string(),
-  guess: z.string().min(5, "Your guess must be at least 5 characters long."),
-});
-
-interface SolveFormState {
+// --- Solve Case Action ---
+interface SolveCaseFormState {
     message: string;
     isCorrect?: boolean;
     success: boolean;
-    errors?: Record<string, string[] | undefined>;
+    errors?: Partial<Record<keyof SolveCaseInputDTO | '_form', string[]>>;
 }
 
 export async function solveCaseAction(
-  prevState: SolveFormState,
+  prevState: SolveCaseFormState,
   formData: FormData
-): Promise<SolveFormState> {
-  const rawFormData = {
+): Promise<SolveCaseFormState> {
+  
+  const solveData: SolveCaseInputDTO = {
     caseId: formData.get("caseId") as string,
     guess: formData.get("guess") as string,
   };
 
-  const validatedFields = SolveCaseSchema.safeParse(rawFormData);
+  const solveCaseUseCase = new SolveCaseUseCase(caseRepository);
+  const result = await solveCaseUseCase.execute(solveData);
 
-  if (!validatedFields.success) {
+  if (!result.success) {
     return {
-      message: "Invalid submission.",
-      errors: validatedFields.error.flatten().fieldErrors,
+      message: result.message,
+      errors: result.errors?.flatten().fieldErrors as SolveCaseFormState['errors'],
       success: false,
     };
   }
+  
+  // Optionally revalidate if solving a case changes its state (e.g., solved count)
+  // revalidatePath(`/mysteries/${solveData.caseId}`);
 
-  try {
-    const mysteryCase = await dbGetCaseById(validatedFields.data.caseId);
-    if (!mysteryCase) {
-      return { message: "Case not found.", success: false };
-    }
-
-    // Simple string comparison for solution (case-insensitive, trim whitespace)
-    const isCorrect =
-      mysteryCase.solution.trim().toLowerCase() ===
-      validatedFields.data.guess.trim().toLowerCase();
-
-    if (isCorrect) {
-      return { message: "Congratulations! Your solution is correct!", isCorrect: true, success: true };
-    } else {
-      return { message: "That's not quite right. Keep investigating!", isCorrect: false, success: true };
-    }
-  } catch (error) {
-    return { message: "Error submitting solution.", success: false };
-  }
+  return {
+    message: result.message,
+    isCorrect: result.isCorrect,
+    success: true,
+  };
 }

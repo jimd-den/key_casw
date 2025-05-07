@@ -1,10 +1,18 @@
+
 import { CaseCard } from "@/features/cases/components/case-card";
-import { getCases } from "@/lib/data-store";
 import { AlertCircle, SearchX } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ListCasesUseCase } from "@/core/application/use-cases/case/list-cases.use-case";
+import { InMemoryCaseRepository } from "@/core/interface-adapters/gateways/in-memory-case.repository";
+
+async function getPublishedCases() {
+  const caseRepository = new InMemoryCaseRepository();
+  const listCasesUseCase = new ListCasesUseCase(caseRepository);
+  return await listCasesUseCase.execute({ publishedOnly: true });
+}
 
 export default async function MysteriesPage() {
-  const cases = await getCases();
+  const cases = await getPublishedCases();
 
   return (
     <div className="space-y-8">

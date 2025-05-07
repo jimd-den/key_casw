@@ -1,4 +1,6 @@
-import type { MysteryCase } from "@/types";
+
+import type { MysteryCase } from "@/core/enterprise/entities/mystery-case.entity"; // Updated import
+import type { Evidence } from "@/core/enterprise/entities/evidence.entity"; // Updated import, though not directly used here, good for consistency
 
 export const initialMockCases: MysteryCase[] = [
   {
