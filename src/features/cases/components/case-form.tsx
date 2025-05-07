@@ -1,4 +1,3 @@
-
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -22,10 +21,10 @@ import { useAuth } from "@/context/auth-context";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { createCaseAction } from "@/lib/actions/case.actions";
-import { CreateCaseSchemaDTO as CreateCaseSchema, type CreateCaseInputDTO as CreateCaseInput } from "@/core/application/use-cases/case/create-case.use-case";
+import { CreateCaseSchemaDTO, type CreateCaseInputDTO } from "@/core/application/use-cases/case/create-case.use-case";
 import type { Difficulty } from "@/core/enterprise/entities/mystery-case.entity";
 import type { EvidenceType } from "@/core/enterprise/entities/evidence.entity";
-import { FilePlus, PlusCircle, Trash2, Image as ImageIcon, FileText, FileAudio, StickyNote } from "lucide-react";
+import { FilePlus, PlusCircle, Trash2, Image as ImageIcon, FileText, FileAudio, StickyNote, Loader2 } from "lucide-react";
 import { useFormState } from "react-dom";
 import { useEffect } from "react";
 
@@ -43,14 +42,13 @@ export function CaseForm() {
   const router = useRouter();
   const { toast } = useToast();
 
-  const form = useForm<CreateCaseInput>({
-    resolver: zodResolver(CreateCaseSchema), // Using DTO schema from use case
+  const form = useForm<CreateCaseInputDTO>({ // Use CreateCaseInputDTO
+    resolver: zodResolver(CreateCaseSchemaDTO), // Using DTO schema from use case
     defaultValues: {
       title: "",
       description: "",
       difficulty: "Medium",
-      // authorId is set via hidden input, filled by effect
-      evidence: [{ title: "", type: "note", content: "", description: "" }],
+      evidence: [{ title: "", type: "note", content: "", description: "", dataAiHint: "" }],
       suspects: [],
       victims: [],
       solution: "",
@@ -73,7 +71,6 @@ export function CaseForm() {
       toast({ title: "Unauthorized", description: "Please log in to create a case.", variant: "destructive" });
       router.push("/auth/login");
     }
-    // authorId is handled by a hidden field in the form, no need to setValue here for it.
   }, [currentUser, authLoading, router, toast]);
 
   useEffect(() => {
@@ -87,11 +84,11 @@ export function CaseForm() {
         form.reset(); 
         router.push(`/mysteries/${state.caseId}`);
       } else if (!state.success && state.errors) {
-        // RHF's zodResolver should handle most client-side errors.
-        // This is for server-side validation errors returned by the action.
+        // This handles server-side validation errors returned by the action.
+        // RHF's zodResolver handles client-side errors.
         Object.entries(state.errors).forEach(([key, value]) => {
-          if (value) {
-            form.setError(key as keyof CreateCaseInput, {
+          if (value && Array.isArray(value)) { // Ensure value is an array of strings
+            form.setError(key as keyof CreateCaseInputDTO, {
               type: "server",
               message: value.join(", "),
             });
@@ -102,7 +99,7 @@ export function CaseForm() {
   }, [state, toast, router, form]);
 
 
-  if (authLoading) return <p>Loading user information...</p>;
+  if (authLoading) return <div className="flex justify-center items-center h-32"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading user...</p></div>;
   if (!currentUser) return null; 
 
   return (
@@ -117,9 +114,8 @@ export function CaseForm() {
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form action={formAction} className="space-y-8"> {/* Changed to formAction */}
-            {/* Hidden authorId field */}
-            {currentUser?.id && <input type="hidden" {...form.register("authorId" as any)} value={currentUser.id} />}
+          <form action={formAction} className="space-y-8">
+            {currentUser?.id && <input type="hidden" name="authorId" value={currentUser.id} />}
 
             <FormField
               control={form.control}
@@ -198,22 +194,22 @@ export function CaseForm() {
                     name={`evidence.${index}.content`}
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{form.watch(`evidence.${index}.type`) === 'note' ? 'Note Content' : 'File URL / Text Content'}</FormLabel>
+                        <FormLabel>{form.watch(`evidence.${index}.type`) === 'note' ? 'Note Content' : 'File URL / Text Content / Data URI'}</FormLabel>
                         <FormControl>
                           {form.watch(`evidence.${index}.type`) === 'note' || form.watch(`evidence.${index}.type`) === 'document' ? (
-                             <Textarea placeholder={form.watch(`evidence.${index}.type`) === 'document' ? "Text: Document content here..." : "Your note content..."} {...field} />
+                             <Textarea placeholder={form.watch(`evidence.${index}.type`) === 'document' ? "Text: Document content here or paste Data URI..." : "Your note content..."} {...field} />
                           ) : (
-                            <Input placeholder="https://example.com/image.jpg or data for mock upload" {...field} type={form.watch(`evidence.${index}.type`) === 'picture' || form.watch(`evidence.${index}.type`) === 'audio' ? 'text':'text'}/>
+                            <Input placeholder="https://example.com/image.jpg or Data URI (data:image/...)" {...field} />
                           )}
                         </FormControl>
-                         { (form.watch(`evidence.${index}.type`) !== 'note' && form.watch(`evidence.${index}.type`) !== 'document' ) &&
-                            <FormDescription>For demo: enter a URL or placeholder text. Real file uploads are not fully implemented in this UI mock.</FormDescription>
+                         { (form.watch(`evidence.${index}.type`) !== 'note' ) &&
+                            <FormDescription>For pictures/audio, use a direct URL or a Base64 Data URI. For documents, prefix text content with "Text: " or use a Data URI.</FormDescription>
                          }
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                   { (form.watch(`evidence.${index}.type`) !== 'note' && form.watch(`evidence.${index}.type`) !== 'document' ) &&
+                   { (form.watch(`evidence.${index}.type`) !== 'note') &&
                     <FormField
                         control={form.control}
                         name={`evidence.${index}.fileName`}
@@ -221,6 +217,20 @@ export function CaseForm() {
                         <FormItem>
                             <FormLabel>File Name (Optional)</FormLabel>
                             <FormControl><Input placeholder="e.g., evidence_audio.mp3" {...field} /></FormControl>
+                            <FormMessage />
+                        </FormItem>
+                        )}
+                    />
+                   }
+                   { (form.watch(`evidence.${index}.type`) === 'picture' ) &&
+                    <FormField
+                        control={form.control}
+                        name={`evidence.${index}.dataAiHint`}
+                        render={({ field }) => (
+                        <FormItem>
+                            <FormLabel>AI Hint for Image (Optional)</FormLabel>
+                            <FormControl><Input placeholder="e.g., 'security camera', 'document page'" {...field} /></FormControl>
+                            <FormDescription>Keywords for placeholder image generation if URL is mock (max 2 words).</FormMessage>
                             <FormMessage />
                         </FormItem>
                         )}
@@ -234,7 +244,7 @@ export function CaseForm() {
                         <FormLabel>Evidence Description (Author's Note)</FormLabel>
                         <FormControl><Textarea placeholder="Optional notes about this evidence..." {...field} /></FormControl>
                         <FormMessage />
-                      </FormItem> // Corrected closing tag
+                      </FormItem>
                     )}
                   />
                   <Button type="button" variant="destructive" size="sm" onClick={() => remove(index)}>
@@ -245,7 +255,7 @@ export function CaseForm() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => append({ title: "", type: "note", content: "", description: "" })}
+                onClick={() => append({ title: "", type: "note", content: "", description: "", dataAiHint: "" })}
               >
                 <PlusCircle className="mr-2 h-4 w-4" />Add Evidence
               </Button>
@@ -260,7 +270,6 @@ export function CaseForm() {
                   <FormControl>
                     <Input 
                       placeholder="Comma-separated, e.g., John Doe, Jane Smith" 
-                      // RHF expects array for 'suspects', so we handle conversion for display and change
                       value={Array.isArray(field.value) ? field.value.join(', ') : ''}
                       onChange={(e) => field.onChange(e.target.value.split(',').map(s => s.trim()).filter(s => s))}
                     />
@@ -326,7 +335,7 @@ export function CaseForm() {
             />
             
             <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
-              {form.formState.isSubmitting ? "Creating Case..." : "Create Case"}
+              {form.formState.isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Creating Case...</> : "Create Case"}
             </Button>
             {state.message && !state.success && state.errors?._form && (
               <p className="text-sm font-medium text-destructive">{state.errors._form.join(', ')}</p>

@@ -1,10 +1,9 @@
-
 import type { ICaseRepository } from '@/core/application/ports/out/case.repository';
 import { z } from 'zod';
 
 export const SolveCaseSchemaDTO = z.object({
   caseId: z.string().min(1, "Case ID is required."),
-  guess: z.string().min(5, "Your guess must be at least 5 characters long."),
+  guess: z.string().min(5, "Your guess must be at least 5 characters long.").max(2000, "Guess is too long."),
 });
 
 export type SolveCaseInputDTO = z.infer<typeof SolveCaseSchemaDTO>;
@@ -13,7 +12,7 @@ export interface SolveCaseOutputDTO {
   success: boolean;
   message: string;
   isCorrect?: boolean;
-  errors?: z.ZodError<SolveCaseInputDTO>;
+  errors?: z.ZodError<SolveCaseInputDTO>; // Return ZodError for detailed client-side handling
 }
 
 export class SolveCaseUseCase {
@@ -24,7 +23,7 @@ export class SolveCaseUseCase {
     if (!validationResult.success) {
       return {
         success: false,
-        message: "Invalid submission.",
+        message: "Invalid submission. Please check your input.",
         errors: validationResult.error,
       };
     }
@@ -34,7 +33,7 @@ export class SolveCaseUseCase {
     try {
       const mysteryCase = await this.caseRepository.findById(caseId);
       if (!mysteryCase) {
-        return { success: false, message: "Case not found." };
+        return { success: false, message: "Case not found. It might have been deleted." };
       }
 
       // Simple string comparison for solution (case-insensitive, trim whitespace)
@@ -49,7 +48,7 @@ export class SolveCaseUseCase {
       }
     } catch (error) {
       console.error("Error in SolveCaseUseCase:", error);
-      return { success: false, message: "Error submitting solution due to an unexpected error." };
+      return { success: false, message: "Error submitting solution due to an unexpected error. Please try again." };
     }
   }
 }
