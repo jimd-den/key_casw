@@ -1,3 +1,4 @@
+
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -18,11 +19,12 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { useAuth } from "@/context/auth-context";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import { KeyRound, LogInIcon } from "lucide-react";
+import { KeyRound, LogInIcon, Loader2 } from "lucide-react";
 import Link from "next/link";
 
+const publicKeyRegex = /^key_pub_P256_spki_b64_[A-Za-z0-9+/=]+$/;
 const formSchema = z.object({
-  publicKey: z.string().min(10, "Public key seems too short."),
+  publicKey: z.string().regex(publicKeyRegex, "Invalid public key format. Expected 'key_pub_P256_spki_b64_...'"),
   privateKeyProof: z.string().min(1, "Proof of private key is required."), // Simplified: just type anything
 });
 
@@ -66,7 +68,7 @@ export function LoginForm() {
           <LogInIcon className="mr-2 h-6 w-6" /> Log In
         </CardTitle>
         <CardDescription>
-          Enter your public key and prove ownership of your private key to log in.
+          Enter your public key and simulate proving ownership of your private key to log in.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -79,10 +81,10 @@ export function LoginForm() {
                 <FormItem>
                   <FormLabel>Public Key</FormLabel>
                   <FormControl>
-                    <Input placeholder="Your public key" {...field} />
+                    <Input placeholder="Your public key (e.g., key_pub_P256_...)" {...field} />
                   </FormControl>
                   <FormDescription>
-                    Your unique public identifier.
+                    Your unique public identifier generated during signup.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -93,19 +95,19 @@ export function LoginForm() {
               name="privateKeyProof"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Private Key Proof (Mock)</FormLabel>
+                  <FormLabel>Private Key Proof (Simulation)</FormLabel>
                   <FormControl>
-                    <Input type="password" placeholder="Enter your private key (simulation)" {...field} />
+                    <Input type="password" placeholder="Enter any text to simulate proof" {...field} />
                   </FormControl>
                   <FormDescription>
-                    Simulate proving you control the private key. In a real app, this would involve a cryptographic challenge, not typing your private key. For this demo, type your mock private key if you remember it from signup, or any text.
+                    This step simulates cryptographic proof. In a real app, you would use your saved private key to sign a challenge, not type the key itself. For this demo, type any text (e.g., the private key string you saved, or simply "password").
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
             <Button type="submit" className="w-full" disabled={authLoading || !form.formState.isValid}>
-             {authLoading ? "Logging In..." : "Log In"}
+             {authLoading ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Logging In...</>) : "Log In"}
             </Button>
           </form>
         </Form>

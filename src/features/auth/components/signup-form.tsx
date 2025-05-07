@@ -1,3 +1,4 @@
+
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -18,24 +19,26 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { useAuth } from "@/context/auth-context";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import { KeyRound, UserPlus } from "lucide-react";
+import { KeyRound, UserPlus, Loader2, ShieldAlert } from "lucide-react";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 
+const publicKeyRegex = /^key_pub_P256_spki_b64_[A-Za-z0-9+/=]+$/;
 const formSchema = z.object({
-  username: z.string().min(3, "Username must be at least 3 characters.").optional(),
-  publicKey: z.string().min(10, "Public key seems too short."), // Simplified validation
+  username: z.string().min(3, "Username must be at least 3 characters.").optional().or(z.literal("")),
+  publicKey: z.string().regex(publicKeyRegex, "Invalid public key format. Expected 'key_pub_P256_spki_b64_...' followed by Base64 string."),
 });
 
-// Simulate generating a key pair
-const generateMockKeyPair = () => {
-  const randomString = (length: number) => Math.random().toString(36).substring(2, 2 + length);
-  return {
-    publicKey: `pubkey-${randomString(12)}`,
-    privateKey: `privkey-${randomString(12)}` // In real app, this is NOT sent or stored by server
-  };
-};
-
+// Helper function to convert ArrayBuffer to Base64
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}
 
 export function SignupForm() {
   const { signup, isLoading: authLoading } = useAuth();
@@ -43,6 +46,7 @@ export function SignupForm() {
   const { toast } = useToast();
   const [generatedKeys, setGeneratedKeys] = useState<{publicKey: string, privateKey: string} | null>(null);
   const [showPrivateKey, setShowPrivateKey] = useState(false);
+  const [isGeneratingKeys, setIsGeneratingKeys] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -54,35 +58,89 @@ export function SignupForm() {
 
   useEffect(() => {
     if (generatedKeys) {
-      form.setValue("publicKey", generatedKeys.publicKey);
+      form.setValue("publicKey", generatedKeys.publicKey, { shouldValidate: true });
     }
   }, [generatedKeys, form]);
 
-  const handleGenerateKeys = () => {
-    const keys = generateMockKeyPair();
-    setGeneratedKeys(keys);
-    setShowPrivateKey(true); 
-    toast({
-      title: "Keys Generated (Mock)",
-      description: "Your new public and private keys are shown below. Store your private key securely!",
-    });
+  const handleGenerateKeys = async () => {
+    setIsGeneratingKeys(true);
+    setShowPrivateKey(false);
+    setGeneratedKeys(null);
+    form.resetField("publicKey");
+
+    if (typeof window.crypto === 'undefined' || typeof window.crypto.subtle === 'undefined') {
+        toast({
+            title: "Error",
+            description: "Web Crypto API is not available in your browser. Cannot generate keys.",
+            variant: "destructive",
+        });
+        setIsGeneratingKeys(false);
+        return;
+    }
+
+    try {
+      const keyPair = await window.crypto.subtle.generateKey(
+        {
+          name: 'ECDSA',
+          namedCurve: 'P-256', // NIST P-256
+        },
+        true, // key is extractable
+        ['sign', 'verify'] // key can be used for signing and verification
+      );
+
+      // Export public key in SPKI format, then Base64 encode
+      const publicKeyDer = await window.crypto.subtle.exportKey(
+        'spki',
+        keyPair.publicKey
+      );
+      const publicKeyBase64 = arrayBufferToBase64(publicKeyDer);
+
+      // Export private key in PKCS8 format, then Base64 encode (for user to save)
+      const privateKeyDer = await window.crypto.subtle.exportKey(
+        'pkcs8',
+        keyPair.privateKey
+      );
+      const privateKeyBase64 = arrayBufferToBase64(privateKeyDer);
+      
+      const newKeys = {
+        publicKey: `key_pub_P256_spki_b64_${publicKeyBase64}`,
+        privateKey: `key_priv_P256_pkcs8_b64_${privateKeyBase64}`,
+      };
+
+      setGeneratedKeys(newKeys);
+      setShowPrivateKey(true); 
+      toast({
+        title: "Secure Keys Generated!",
+        description: "Your new public and private keys are shown below. Store your PRIVATE KEY in a very safe place. If you lose it, you lose access. The app will NOT store it.",
+        duration: 10000,
+      });
+    } catch (error) {
+      console.error("Key generation error:", error);
+      toast({
+        title: "Key Generation Failed",
+        description: "Could not generate keys. See console for details.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingKeys(false);
+    }
   };
 
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    if (!values.publicKey) {
+    if (!values.publicKey) { // Should be caught by zod, but as a safeguard
       toast({
         title: "Error",
-        description: "Please generate or provide a public key.",
+        description: "Public key is missing. Please generate or provide one.",
         variant: "destructive",
       });
       return;
     }
     try {
-      await signup(values.publicKey, values.username);
+      await signup(values.publicKey, values.username || undefined); // Pass undefined if username is empty string
       toast({
         title: "Account Created!",
-        description: "You've successfully signed up. You are now logged in.",
+        description: "You've successfully signed up and are now logged in.",
       });
       router.push("/profile");
     } catch (error) {
@@ -101,23 +159,50 @@ export function SignupForm() {
           <UserPlus className="mr-2 h-6 w-6" /> Create Account
         </CardTitle>
         <CardDescription>
-          Generate a new digital key pair or use an existing public key to create your account.
+          Generate a new secure digital key pair for your account.
         </CardDescription>
       </CardHeader>
       <CardContent>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            <Button type="button" onClick={handleGenerateKeys} className="w-full mb-4" variant="outline">
-              <KeyRound className="mr-2 h-4 w-4" /> Generate New Key Pair (Mock)
+            <Button 
+              type="button" 
+              onClick={handleGenerateKeys} 
+              className="w-full mb-4" 
+              variant="outline"
+              disabled={isGeneratingKeys}
+            >
+              {isGeneratingKeys ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <KeyRound className="mr-2 h-4 w-4" />
+              )}
+              {isGeneratingKeys ? "Generating Keys..." : "Generate New Secure Key Pair"}
             </Button>
 
             {generatedKeys && showPrivateKey && (
-                 <div className="p-3 my-2 border border-yellow-500 bg-yellow-50 rounded-md text-sm">
-                    <p className="font-semibold text-yellow-700">Save your Private Key securely!</p>
-                    <p className="text-yellow-600 break-all">Private Key: <span className="font-mono">{generatedKeys.privateKey}</span></p>
-                    <p className="mt-1 text-xs text-yellow-500">This is for demonstration. In a real app, the private key is never shown like this after generation by client-side crypto tools and is NEVER sent to the server.</p>
-                    <Button type="button" variant="link" size="sm" className="text-yellow-700 p-0 h-auto mt-1" onClick={() => setShowPrivateKey(false)}>Hide Private Key</Button>
-                </div>
+                 <Card className="p-4 my-2 border-destructive bg-destructive/10">
+                    <CardHeader className="p-0 pb-2">
+                        <CardTitle className="text-lg flex items-center text-destructive">
+                            <ShieldAlert className="mr-2 h-5 w-5"/>IMPORTANT: Save Your Private Key!
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0 text-sm space-y-2">
+                        <p className="text-destructive-foreground font-semibold">
+                            This is your ONLY chance to save your private key. It grants full access to your account.
+                        </p>
+                        <div className="p-2 bg-background rounded-md border border-input">
+                            <p className="font-semibold">Private Key:</p>
+                            <p className="text-xs break-all font-mono select-all">{generatedKeys.privateKey}</p>
+                        </div>
+                        <ul className="list-disc list-inside text-xs text-muted-foreground space-y-1">
+                            <li>Store it in a password manager or a secure, offline location.</li>
+                            <li>DO NOT share it with anyone.</li>
+                            <li>If you lose it, you cannot recover your account.</li>
+                        </ul>
+                         <Button type="button" variant="link" size="sm" className="text-destructive p-0 h-auto mt-2 hover:underline" onClick={() => setShowPrivateKey(false)}>I've saved it, hide Private Key</Button>
+                    </CardContent>
+                </Card>
             )}
             
             <FormField
@@ -127,10 +212,10 @@ export function SignupForm() {
                 <FormItem>
                   <FormLabel>Public Key</FormLabel>
                   <FormControl>
-                    <Input placeholder="Your public key" {...field} readOnly={!!generatedKeys} />
+                    <Input placeholder="Generated automatically or paste existing" {...field} readOnly={!!generatedKeys} />
                   </FormControl>
                   <FormDescription>
-                    This is your unique public identifier.
+                    Your unique public identifier. (Format: key_pub_P256_spki_b64_...)
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -145,12 +230,13 @@ export function SignupForm() {
                   <FormControl>
                     <Input placeholder="Choose a username" {...field} />
                   </FormControl>
+                  <FormDescription>This will be your display name.</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
-            <Button type="submit" className="w-full" disabled={authLoading || !form.formState.isValid || !form.getValues("publicKey")}>
-              {authLoading ? "Creating Account..." : "Sign Up"}
+            <Button type="submit" className="w-full" disabled={authLoading || isGeneratingKeys || !form.formState.isValid || !form.getValues("publicKey")}>
+              {authLoading ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Creating Account...</>) : "Sign Up"}
             </Button>
           </form>
         </Form>
